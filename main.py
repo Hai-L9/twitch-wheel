@@ -128,8 +128,7 @@ class WheelCanvas(tk.Canvas):
         super().__init__(master, width=700, height=700, bg="black", highlightthickness=0)
         self.rotation = 0.0
         self.entries: Dict[str, int] = {}
-        self.winner_text = ""
-        self.winner_expires_at = 0.0
+        self.current_phrase = ""
 
     def set_entries(self, entries: Dict[str, int]) -> None:
         self.entries = {k: v for k, v in entries.items() if v > 0}
@@ -139,9 +138,8 @@ class WheelCanvas(tk.Canvas):
         self.rotation = rotation % 360
         self.draw_wheel()
 
-    def show_winner(self, phrase: str, seconds: int = 4) -> None:
-        self.winner_text = f"Winner: {phrase}"
-        self.winner_expires_at = time.time() + seconds
+    def set_current_phrase(self, phrase: str) -> None:
+        self.current_phrase = phrase
         self.draw_wheel()
 
     def draw_wheel(self) -> None:
@@ -149,7 +147,7 @@ class WheelCanvas(tk.Canvas):
         cx, cy = 350, 350
         radius = 300
         self.create_polygon(
-            [cx, 20, cx - 15, 60, cx + 15, 60],
+            [cx - 15, 20, cx + 15, 20, cx, 60],
             fill="white",
             outline="white",
         )
@@ -189,8 +187,14 @@ class WheelCanvas(tk.Canvas):
             )
             start_angle += extent
 
-        if self.winner_text and time.time() < self.winner_expires_at:
-            self.create_text(cx, cy, text=self.winner_text, fill="white", font=("Arial", 30, "bold"))
+        if self.current_phrase:
+            self.create_text(
+                cx,
+                675,
+                text=f"Pointer slice: {self.current_phrase}",
+                fill="#00ff66",
+                font=("Arial", 20, "bold"),
+            )
 
 
 class App:
@@ -207,7 +211,6 @@ class App:
         self.spinning = False
         self.rotation = 0.0
         self.spin_velocity = 0.0
-        self.winner_angle_target = 0.0
         self.vote_counts: Dict[str, int] = {}
 
         self.irc_client: Optional[TwitchIRCClient] = None
@@ -218,6 +221,7 @@ class App:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.process_events)
         self.root.after(250, self.update_timer)
+        self.root.after(16, self.update_spin_state)
 
         self.connect_chat()
 
@@ -378,14 +382,36 @@ class App:
         self.vote_counts[target_phrase] = self.vote_counts.get(target_phrase, 0) + 1
         self.refresh_table_from_votes()
 
-    def refresh_table_from_votes(self) -> None:
+    def get_top_votes(self) -> Dict[str, int]:
         max_phrases = max(1, self.safe_int(self.max_phrases_var.get(), 10))
-        top_votes = dict(sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases])
+        return dict(sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases])
+
+    def phrase_under_pointer(self) -> str:
+        top_votes = self.get_top_votes()
+        total = sum(top_votes.values())
+        if total <= 0:
+            return ""
+
+        pointer_angle = 90.0
+        wheel_angle = (pointer_angle - (self.rotation % 360)) % 360
+
+        running = 0.0
+        for phrase, votes in top_votes.items():
+            extent = 360.0 * (votes / total)
+            if running <= wheel_angle < running + extent:
+                return phrase
+            running += extent
+
+        return next(iter(top_votes), "")
+
+    def refresh_table_from_votes(self) -> None:
+        top_votes = self.get_top_votes()
 
         self.tree.delete(*self.tree.get_children())
         for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
             self.tree.insert("", "end", values=(phrase, votes))
         self.wheel_canvas.set_entries(top_votes)
+        self.wheel_canvas.set_current_phrase(self.phrase_under_pointer())
 
     def start_vote(self) -> None:
         self.voting_active = True
@@ -485,66 +511,28 @@ class App:
         editor.bind("<FocusOut>", save_edit)
 
     def spin_wheel(self) -> None:
-        if self.spinning:
-            return
-
-        max_phrases = max(1, self.safe_int(self.max_phrases_var.get(), 10))
-        weighted = [
-            (phrase, votes)
-            for phrase, votes in sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases]
-            if votes > 0
-        ]
-        if not weighted:
+        top_votes = self.get_top_votes()
+        if not any(v > 0 for v in top_votes.values()):
             messagebox.showinfo("No segments", "Add at least one phrase with votes before spinning.")
             return
 
-        total = sum(v for _, v in weighted)
-        pick = random.uniform(0, total)
-        running = 0.0
-        winner = weighted[0][0]
-        winner_start = 0.0
-        winner_extent = 0.0
-
-        for phrase, votes in weighted:
-            extent = 360.0 * (votes / total)
-            if running <= (pick / total) * 360 < running + extent:
-                winner = phrase
-                winner_start = running
-                winner_extent = extent
-                break
-            running += extent
-
-        winner_mid = winner_start + winner_extent / 2
-        pointer_angle = 90
-        final_rotation = (pointer_angle - winner_mid) % 360
-
-        current_rotation = self.rotation % 360
-        align_delta = (final_rotation - current_rotation) % 360
-        if align_delta < 20:
-            align_delta += 360
-
-        spins = random.randint(6, 10)
-        self.winner_angle_target = self.rotation + align_delta + 360 * spins
-        self.spin_velocity = random.uniform(25, 40)
+        self.spin_velocity += random.uniform(18, 28)
+        self.spin_velocity = min(self.spin_velocity, 120.0)
         self.spinning = True
-        self._animate_spin(winner)
 
-    def _animate_spin(self, winner: str) -> None:
-        if not self.spinning:
-            return
+    def update_spin_state(self) -> None:
+        if self.spinning or self.spin_velocity > 0:
+            self.rotation += self.spin_velocity
+            self.spin_velocity *= 0.985
 
-        self.rotation += self.spin_velocity
-        self.spin_velocity *= 0.97
-        self.wheel_canvas.set_rotation(self.rotation)
+            if self.spin_velocity < 0.05:
+                self.spin_velocity = 0.0
+                self.spinning = False
 
-        if self.rotation >= self.winner_angle_target and self.spin_velocity < 0.8:
-            self.spinning = False
-            self.rotation = self.winner_angle_target % 360
             self.wheel_canvas.set_rotation(self.rotation)
-            self.wheel_canvas.show_winner(winner)
-            return
+            self.wheel_canvas.set_current_phrase(self.phrase_under_pointer())
 
-        self.root.after(16, lambda: self._animate_spin(winner))
+        self.root.after(16, self.update_spin_state)
 
     @staticmethod
     def safe_int(text: str, default: int) -> int:

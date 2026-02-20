@@ -10,7 +10,7 @@ A local desktop app that connects to Twitch chat, counts phrase votes in real ti
 - Wheel/table display only the top **N** most common phrases (N = input field).
 - Similar/contained phrases are automatically merged into an existing phrase bucket to reduce duplicate near-matches.
 - Wheel slices are weighted by vote count and update instantly.
-- Separate wheel render window with spin animation and winner overlay.
+- Separate wheel render window with continuous spin and a live green label showing the slice under the pointer.
 - Connection status/error area plus live chat feed.
 
 ## Setup
@@ -39,6 +39,7 @@ python main.py
 - Phrase count increments as messages arrive, and near-duplicate messages map to existing phrase entries when similar enough.
 - **Top phrases on wheel** sets how many highest-vote phrases are shown on the wheel/table; lower-ranked phrases are ignored in the display/spin until they move into the top set.
 - Edit the table at any time; wheel updates immediately.
+- Pressing **spinwheel** adds momentum even if the wheel is already spinning.
 
 ## Build as a Windows EXE (PyInstaller)
 
