@@ -11,7 +11,7 @@ import tkinter as tk
 from dataclasses import dataclass
 from tkinter import filedialog, messagebox, ttk
 from difflib import SequenceMatcher
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Tuple
 
 CONFIG_PATH = "config.json"
 VOTE_DURATION_SECONDS = 120
@@ -20,7 +20,7 @@ VOTE_DURATION_SECONDS = 120
 @dataclass
 class ChatEvent:
     kind: str
-    payload: str
+    payload: Any
 
 
 class TwitchIRCClient(threading.Thread):
@@ -29,7 +29,7 @@ class TwitchIRCClient(threading.Thread):
         channel: str,
         nickname: str,
         oauth_token: str,
-        on_chat: Callable[[str], None],
+        on_chat: Callable[[str, str], None],
         on_status: Callable[[str], None],
         on_error: Callable[[str], None],
     ) -> None:
@@ -87,27 +87,29 @@ class TwitchIRCClient(threading.Thread):
                         self.sock.send("PONG :tmi.twitch.tv\r\n".encode("utf-8"))
                         continue
                     if "PRIVMSG" in line:
-                        message = self._parse_privmsg(line)
-                        if message:
-                            self.on_chat(message)
+                        username, message = self._parse_privmsg(line)
+                        if username and message:
+                            self.on_chat(username, message)
         except Exception as exc:  # network/parsing hard fail
             self.on_error(f"Failed to connect/read Twitch chat: {exc}")
 
     @staticmethod
-    def _parse_privmsg(raw_line: str) -> str:
+    def _parse_privmsg(raw_line: str) -> Tuple[str, str]:
         try:
-            if "PRIVMSG" not in raw_line:
-                return ""
+            if "PRIVMSG" not in raw_line or "!" not in raw_line:
+                return "", ""
+
+            username = raw_line.split("!", 1)[0].lstrip(":").strip()
             parts = raw_line.split(" PRIVMSG ", 1)
             if len(parts) != 2:
-                return ""
+                return "", ""
             tail = parts[1]
             msg_split = tail.split(" :", 1)
             if len(msg_split) != 2:
-                return ""
-            return msg_split[1].strip()
+                return "", ""
+            return username, msg_split[1].strip()
         except Exception:
-            return ""
+            return "", ""
 
 
 class WheelCanvas(tk.Canvas):
@@ -228,6 +230,7 @@ class App:
         self.rotation = 0.0
         self.spin_velocity = 0.0
         self.vote_counts: Dict[str, int] = {}
+        self.user_votes: Dict[str, str] = {}
 
         self.irc_client: Optional[TwitchIRCClient] = None
 
@@ -274,7 +277,7 @@ class App:
 
         status_frame = ttk.Frame(self.root, padding=10)
         status_frame.pack(fill="x")
-        ttk.Label(status_frame, text="Connection status:").pack(side="left")
+        ttk.Label(status_frame, text="Status:").pack(side="left")
         self.status_var = tk.StringVar(value="Disconnected")
         ttk.Label(status_frame, textvariable=self.status_var, foreground="blue").pack(side="left", padx=6)
 
@@ -335,7 +338,7 @@ class App:
             channel=channel,
             nickname=nickname,
             oauth_token=token,
-            on_chat=lambda m: self.event_queue.put(ChatEvent("chat", m)),
+            on_chat=lambda u, m: self.event_queue.put(ChatEvent("chat", (u, m))),
             on_status=lambda s: self.event_queue.put(ChatEvent("status", s)),
             on_error=lambda e: self.event_queue.put(ChatEvent("error", e)),
         )
@@ -358,8 +361,9 @@ class App:
                 break
 
             if event.kind == "chat":
-                self.log_chat(event.payload)
-                self.consume_vote(event.payload)
+                username, message = event.payload
+                self.log_chat(f"[{username}] {message}")
+                self.consume_vote(username, message)
             elif event.kind == "status":
                 self.set_status(event.payload)
             elif event.kind == "error":
@@ -393,7 +397,7 @@ class App:
 
         return None
 
-    def consume_vote(self, message: str) -> None:
+    def consume_vote(self, username: str, message: str) -> None:
         if not self.voting_active:
             return
 
@@ -404,7 +408,18 @@ class App:
         matched_phrase = self.find_matching_phrase(phrase)
         target_phrase = matched_phrase or phrase
 
+        previous_phrase = self.user_votes.get(username)
+        if previous_phrase == target_phrase:
+            return
+
+        if previous_phrase:
+            if previous_phrase in self.vote_counts:
+                self.vote_counts[previous_phrase] -= 1
+                if self.vote_counts[previous_phrase] <= 0:
+                    self.vote_counts.pop(previous_phrase, None)
+
         self.vote_counts[target_phrase] = self.vote_counts.get(target_phrase, 0) + 1
+        self.user_votes[username] = target_phrase
         self.refresh_table_from_votes()
 
     def get_top_votes(self) -> Dict[str, int]:
@@ -447,6 +462,7 @@ class App:
         self.voting_active = False
         self.vote_end_at = 0
         self.vote_counts.clear()
+        self.user_votes.clear()
         self.refresh_table_from_votes()
         self.timer_var.set("Voting idle")
 
@@ -546,6 +562,7 @@ class App:
                     imported[target] = imported.get(target, 0) + votes
 
             self.vote_counts = imported
+            self.user_votes.clear()
             self.refresh_table_from_votes()
             self.set_status(f"Imported {len(imported)} segments from {os.path.basename(path)}")
         except OSError as exc:

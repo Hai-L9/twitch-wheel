@@ -39,6 +39,8 @@ python main.py
 - Press **stopvote** to end the voting period early.
 - Every chat message becomes a normalized phrase (`lowercase`, trimmed spaces).
 - Phrase count increments as messages arrive, and near-duplicate messages map to existing phrase entries when similar enough.
+- Each username is limited to one active vote at a time.
+- If a user sends a different phrase later, their previous vote is removed and replaced with the new vote (re-voting).
 - **Top phrases on wheel** sets how many highest-vote phrases are shown on the wheel/table; lower-ranked phrases are ignored in the display/spin until they move into the top set.
 - Edit the table at any time; wheel updates immediately.
 - Pressing **spinwheel** adds momentum even if the wheel is already spinning.
