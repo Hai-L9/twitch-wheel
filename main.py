@@ -235,18 +235,20 @@ class App:
         top = ttk.Frame(self.root, padding=10)
         top.pack(fill="x")
 
-        ttk.Label(top, text="Max tracked phrases:").grid(row=0, column=0, sticky="w")
+        ttk.Label(top, text="Top phrases on wheel:").grid(row=0, column=0, sticky="w")
         self.max_phrases_var = tk.StringVar(value="10")
         ttk.Entry(top, textvariable=self.max_phrases_var, width=8).grid(row=0, column=1, padx=4)
 
         self.start_btn = ttk.Button(top, text="startvote", command=self.start_vote)
         self.start_btn.grid(row=0, column=2, padx=5)
 
-        ttk.Button(top, text="clearvote", command=self.clear_vote).grid(row=0, column=3, padx=5)
-        ttk.Button(top, text="spinwheel", command=self.spin_wheel).grid(row=0, column=4, padx=5)
+        ttk.Button(top, text="stopvote", command=self.stop_vote).grid(row=0, column=3, padx=5)
+
+        ttk.Button(top, text="clearvote", command=self.clear_vote).grid(row=0, column=4, padx=5)
+        ttk.Button(top, text="spinwheel", command=self.spin_wheel).grid(row=0, column=5, padx=5)
 
         self.timer_var = tk.StringVar(value="Voting idle")
-        ttk.Label(top, textvariable=self.timer_var, font=("Arial", 11, "bold")).grid(row=0, column=5, padx=10, sticky="w")
+        ttk.Label(top, textvariable=self.timer_var, font=("Arial", 11, "bold")).grid(row=0, column=6, padx=10, sticky="w")
 
         status_frame = ttk.Frame(self.root, padding=10)
         status_frame.pack(fill="x")
@@ -343,18 +345,17 @@ class App:
         if not phrase:
             return
 
-        max_phrases = self.safe_int(self.max_phrases_var.get(), 10)
-        if phrase not in self.vote_counts and len(self.vote_counts) >= max_phrases:
-            return
-
         self.vote_counts[phrase] = self.vote_counts.get(phrase, 0) + 1
         self.refresh_table_from_votes()
 
     def refresh_table_from_votes(self) -> None:
+        max_phrases = max(1, self.safe_int(self.max_phrases_var.get(), 10))
+        top_votes = dict(sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases])
+
         self.tree.delete(*self.tree.get_children())
-        for phrase, votes in sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0])):
+        for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
             self.tree.insert("", "end", values=(phrase, votes))
-        self.wheel_canvas.set_entries(self.vote_counts)
+        self.wheel_canvas.set_entries(top_votes)
 
     def start_vote(self) -> None:
         self.voting_active = True
@@ -367,6 +368,13 @@ class App:
         self.vote_counts.clear()
         self.refresh_table_from_votes()
         self.timer_var.set("Voting idle")
+
+    def stop_vote(self) -> None:
+        if not self.voting_active:
+            return
+        self.voting_active = False
+        self.vote_end_at = 0
+        self.timer_var.set("Voting stopped early")
 
     def update_timer(self) -> None:
         if self.voting_active:
@@ -440,7 +448,12 @@ class App:
         if self.spinning:
             return
 
-        weighted = [(phrase, votes) for phrase, votes in self.vote_counts.items() if votes > 0]
+        max_phrases = max(1, self.safe_int(self.max_phrases_var.get(), 10))
+        weighted = [
+            (phrase, votes)
+            for phrase, votes in sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases]
+            if votes > 0
+        ]
         if not weighted:
             messagebox.showinfo("No segments", "Add at least one phrase with votes before spinning.")
             return
