@@ -73,3 +73,5 @@ pyinstaller --noconfirm --onefile --windowed --name twitch-wheel-bot --icon app.
 
 - Twitch may throttle or disconnect malformed/unauthorized sessions; check connection status line and chat pane for debug messages.
 - If token/nickname is not configured, app starts but shows config error until fixed.
+- For Kate: git pull origin main
+ pyinstaller --noconfirm --onefile --windowed --name twitch-wheel-bot main.py
