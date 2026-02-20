@@ -273,6 +273,7 @@ class App:
 
         ttk.Label(top, text="Top phrases on wheel:").grid(row=0, column=0, sticky="w")
         self.max_phrases_var = tk.StringVar(value="10")
+        self.max_phrases_var.trace_add("write", self.on_top_phrases_changed)
         ttk.Entry(top, textvariable=self.max_phrases_var, width=8).grid(row=0, column=1, padx=4)
 
         self.start_btn = ttk.Button(top, text="startvote", command=self.start_vote)
@@ -305,12 +306,18 @@ class App:
         ttk.Button(io_controls, text="Import Segments", command=self.import_segments).pack(side="left")
         ttk.Button(io_controls, text="Export Segments", command=self.export_segments).pack(side="left", padx=6)
 
-        self.tree = ttk.Treeview(table_frame, columns=("phrase", "votes"), show="headings", height=20)
+        tree_container = ttk.Frame(table_frame)
+        tree_container.pack(fill="both", expand=True)
+
+        self.tree = ttk.Treeview(tree_container, columns=("phrase", "votes"), show="headings", height=20)
         self.tree.heading("phrase", text="Phrase")
         self.tree.heading("votes", text="Votes")
         self.tree.column("phrase", width=230)
         self.tree.column("votes", width=80, anchor="center")
-        self.tree.pack(fill="both", expand=True)
+        self.tree.pack(side="left", fill="both", expand=True)
+        tree_scrollbar = ttk.Scrollbar(tree_container, orient="vertical", command=self.tree.yview)
+        tree_scrollbar.pack(side="right", fill="y")
+        self.tree.configure(yscrollcommand=tree_scrollbar.set)
         self.tree.bind("<Double-1>", self.edit_tree_cell)
 
         control = ttk.Frame(table_frame)
@@ -441,6 +448,9 @@ class App:
         max_phrases = max(1, self.safe_int(self.max_phrases_var.get(), 10))
         return dict(sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases])
 
+    def on_top_phrases_changed(self, *_args: Any) -> None:
+        self.refresh_table_from_votes()
+
     def pointer_details(self) -> Tuple[str, str]:
         top_votes = self.get_top_votes()
         total = sum(top_votes.values())
@@ -474,9 +484,10 @@ class App:
 
     def refresh_table_from_votes(self) -> None:
         top_votes = self.get_top_votes()
+        all_votes = dict(sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0])))
 
         self.tree.delete(*self.tree.get_children())
-        for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
+        for phrase, votes in all_votes.items():
             self.tree.insert("", "end", values=(phrase, votes))
         self.wheel_canvas.set_entries(top_votes)
         current_phrase, current_voter = self.pointer_details()
