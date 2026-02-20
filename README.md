@@ -7,11 +7,12 @@ A local desktop app that connects to Twitch chat, counts phrase votes in real ti
 - Connects to Twitch IRC and reads live chat from a configured channel.
 - 2-minute vote window using **startvote**.
 - Editable segment table (add, remove, and inline edit phrase/vote counts).
-- Export/import buttons for saving and reloading wheel segment tables as text files.
+- Export/import buttons for saving and reloading wheel segment data (including user-vote associations) as text files.
 - Wheel/table display only the top **N** most common phrases (N = input field).
 - Similar/contained phrases are automatically merged into an existing phrase bucket to reduce duplicate near-matches.
 - Wheel slices are weighted by vote count and update instantly.
 - Separate wheel render window with continuous spin and a live green label showing the slice under the pointer.
+- Wheel display also shows a smaller green `voted by:` line under the current phrase using stored username-vote mappings.
 - Wheel window scales responsively and keeps a fixed square aspect ratio during resize.
 - Connection status/error area plus live chat feed.
 

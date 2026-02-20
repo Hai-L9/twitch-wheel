@@ -131,6 +131,7 @@ class WheelCanvas(tk.Canvas):
         self.rotation = 0.0
         self.entries: Dict[str, int] = {}
         self.current_phrase = ""
+        self.current_voted_by = ""
 
     def set_entries(self, entries: Dict[str, int]) -> None:
         self.entries = {k: v for k, v in entries.items() if v > 0}
@@ -140,8 +141,9 @@ class WheelCanvas(tk.Canvas):
         self.rotation = rotation % 360
         self.draw_wheel()
 
-    def set_current_phrase(self, phrase: str) -> None:
+    def set_current_info(self, phrase: str, voted_by: str) -> None:
         self.current_phrase = phrase
+        self.current_voted_by = voted_by
         self.draw_wheel()
 
     def draw_wheel(self) -> None:
@@ -197,12 +199,21 @@ class WheelCanvas(tk.Canvas):
                 start_angle += extent
 
         if self.current_phrase:
+            phrase_y = height - max(52, int(height * 0.10))
+            voter_y = height - max(22, int(height * 0.045))
             self.create_text(
                 cx,
-                height - max(20, int(height * 0.04)),
+                phrase_y,
                 text=self.current_phrase,
                 fill="#00ff66",
-                font=("Arial", max(12, int(height * 0.028)), "bold"),
+                font=("Arial", max(15, int(height * 0.035)), "bold"),
+            )
+            self.create_text(
+                cx,
+                voter_y,
+                text=self.current_voted_by,
+                fill="#00ff66",
+                font=("Arial", max(11, int(height * 0.024)), "bold"),
             )
 
         pointer_half_width = max(6, radius * 0.035)
@@ -401,6 +412,10 @@ class App:
         if not self.voting_active:
             return
 
+        username = username.strip().lower()
+        if not username:
+            return
+
         phrase = self.normalize_phrase(message)
         if not phrase:
             return
@@ -444,6 +459,22 @@ class App:
 
         return next(iter(top_votes), "")
 
+    def voted_by_text_for_phrase(self, phrase: str) -> str:
+        if not phrase:
+            return ""
+
+        users = sorted(username for username, user_phrase in self.user_votes.items() if user_phrase == phrase)
+        if not users:
+            return "voted by: -"
+
+        preview_count = 4
+        if len(users) <= preview_count:
+            return f"voted by: {', '.join(users)}"
+
+        shown = ", ".join(users[:preview_count])
+        remaining = len(users) - preview_count
+        return f"voted by: {shown} (+{remaining})"
+
     def refresh_table_from_votes(self) -> None:
         top_votes = self.get_top_votes()
 
@@ -451,7 +482,8 @@ class App:
         for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
             self.tree.insert("", "end", values=(phrase, votes))
         self.wheel_canvas.set_entries(top_votes)
-        self.wheel_canvas.set_current_phrase(self.phrase_under_pointer())
+        current_phrase = self.phrase_under_pointer()
+        self.wheel_canvas.set_current_info(current_phrase, self.voted_by_text_for_phrase(current_phrase))
 
     def start_vote(self) -> None:
         self.voting_active = True
@@ -520,11 +552,19 @@ class App:
             return
 
         top_votes = self.get_top_votes()
+        top_phrases = set(top_votes.keys())
+
         try:
             with open(path, "w", encoding="utf-8") as f:
+                f.write("# TWITCH_WHEEL_EXPORT_V2\n")
                 for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
-                    f.write(f"{phrase}\t{votes}\n")
-            self.set_status(f"Exported {len(top_votes)} segments to {os.path.basename(path)}")
+                    f.write(f"SEGMENT\t{phrase}\t{votes}\n")
+
+                for username, phrase in sorted(self.user_votes.items()):
+                    if phrase in top_phrases:
+                        f.write(f"USERVOTE\t{username}\t{phrase}\n")
+
+            self.set_status(f"Exported {len(top_votes)} segments (+ user votes) to {os.path.basename(path)}")
         except OSError as exc:
             messagebox.showerror("Export failed", f"Could not export segments:\n{exc}")
 
@@ -537,20 +577,40 @@ class App:
             return
 
         imported: Dict[str, int] = {}
+        imported_user_votes: Dict[str, str] = {}
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for raw in f:
                     line = raw.strip()
-                    if not line:
+                    if not line or line.startswith("#"):
                         continue
 
-                    if "\t" in line:
-                        phrase_raw, votes_raw = line.rsplit("\t", 1)
+                    parts = line.split("\t")
+
+                    if len(parts) >= 3 and parts[0] == "SEGMENT":
+                        phrase = self.normalize_phrase(parts[1])
+                        votes = self.safe_int(parts[2].strip(), 0)
+                        if phrase and votes > 0:
+                            existing = self.find_matching_phrase(phrase)
+                            target = existing or phrase
+                            imported[target] = imported.get(target, 0) + votes
+                        continue
+
+                    if len(parts) >= 3 and parts[0] == "USERVOTE":
+                        username = parts[1].strip().lower()
+                        phrase = self.normalize_phrase(parts[2])
+                        if username and phrase:
+                            imported_user_votes[username] = phrase
+                        continue
+
+                    if "	" in line:
+                        phrase_raw, votes_raw = line.rsplit("	", 1)
                     else:
-                        parts = line.rsplit(" ", 1)
-                        if len(parts) != 2:
+                        legacy = line.rsplit(" ", 1)
+                        if len(legacy) != 2:
                             continue
-                        phrase_raw, votes_raw = parts
+                        phrase_raw, votes_raw = legacy
 
                     phrase = self.normalize_phrase(phrase_raw)
                     votes = self.safe_int(votes_raw.strip(), 0)
@@ -562,9 +622,20 @@ class App:
                     imported[target] = imported.get(target, 0) + votes
 
             self.vote_counts = imported
-            self.user_votes.clear()
+            self.user_votes = {
+                username: phrase
+                for username, phrase in imported_user_votes.items()
+                if phrase in self.vote_counts and self.vote_counts.get(phrase, 0) > 0
+            }
+
+            for phrase in self.user_votes.values():
+                if phrase not in self.vote_counts:
+                    self.vote_counts[phrase] = 1
+
             self.refresh_table_from_votes()
-            self.set_status(f"Imported {len(imported)} segments from {os.path.basename(path)}")
+            self.set_status(
+                f"Imported {len(imported)} segments and {len(self.user_votes)} user votes from {os.path.basename(path)}"
+            )
         except OSError as exc:
             messagebox.showerror("Import failed", f"Could not import segments:\n{exc}")
 
@@ -629,7 +700,9 @@ class App:
                 self.spinning = False
 
             self.wheel_canvas.set_rotation(self.rotation)
-            self.wheel_canvas.set_current_phrase(self.phrase_under_pointer())
+
+        current_phrase = self.phrase_under_pointer()
+        self.wheel_canvas.set_current_info(current_phrase, self.voted_by_text_for_phrase(current_phrase))
 
         self.root.after(16, self.update_spin_state)
 
