@@ -441,11 +441,11 @@ class App:
         max_phrases = max(1, self.safe_int(self.max_phrases_var.get(), 10))
         return dict(sorted(self.vote_counts.items(), key=lambda x: (-x[1], x[0]))[:max_phrases])
 
-    def phrase_under_pointer(self) -> str:
+    def pointer_details(self) -> Tuple[str, str]:
         top_votes = self.get_top_votes()
         total = sum(top_votes.values())
         if total <= 0:
-            return ""
+            return "", ""
 
         pointer_angle = 90.0
         wheel_angle = (pointer_angle - (self.rotation % 360)) % 360
@@ -454,26 +454,23 @@ class App:
         for phrase, votes in top_votes.items():
             extent = 360.0 * (votes / total)
             if running <= wheel_angle < running + extent:
-                return phrase
+                phrase_users = sorted(username for username, user_phrase in self.user_votes.items() if user_phrase == phrase)
+                voter_slots = phrase_users[:votes]
+                if len(voter_slots) < votes:
+                    missing = votes - len(voter_slots)
+                    voter_slots.extend([f"unknown-{i + 1}" for i in range(missing)])
+
+                if not voter_slots:
+                    return phrase, "voted by: -"
+
+                local_angle = wheel_angle - running
+                slot_extent = extent / len(voter_slots)
+                slot_idx = min(len(voter_slots) - 1, int(local_angle / slot_extent))
+                return phrase, f"voted by: {voter_slots[slot_idx]}"
             running += extent
 
-        return next(iter(top_votes), "")
-
-    def voted_by_text_for_phrase(self, phrase: str) -> str:
-        if not phrase:
-            return ""
-
-        users = sorted(username for username, user_phrase in self.user_votes.items() if user_phrase == phrase)
-        if not users:
-            return "voted by: -"
-
-        preview_count = 4
-        if len(users) <= preview_count:
-            return f"voted by: {', '.join(users)}"
-
-        shown = ", ".join(users[:preview_count])
-        remaining = len(users) - preview_count
-        return f"voted by: {shown} (+{remaining})"
+        fallback_phrase = next(iter(top_votes), "")
+        return fallback_phrase, "voted by: -"
 
     def refresh_table_from_votes(self) -> None:
         top_votes = self.get_top_votes()
@@ -482,8 +479,8 @@ class App:
         for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
             self.tree.insert("", "end", values=(phrase, votes))
         self.wheel_canvas.set_entries(top_votes)
-        current_phrase = self.phrase_under_pointer()
-        self.wheel_canvas.set_current_info(current_phrase, self.voted_by_text_for_phrase(current_phrase))
+        current_phrase, current_voter = self.pointer_details()
+        self.wheel_canvas.set_current_info(current_phrase, current_voter)
 
     def start_vote(self) -> None:
         self.voting_active = True
@@ -701,8 +698,8 @@ class App:
 
             self.wheel_canvas.set_rotation(self.rotation)
 
-        current_phrase = self.phrase_under_pointer()
-        self.wheel_canvas.set_current_info(current_phrase, self.voted_by_text_for_phrase(current_phrase))
+        current_phrase, current_voter = self.pointer_details()
+        self.wheel_canvas.set_current_info(current_phrase, current_voter)
 
         self.root.after(16, self.update_spin_state)
 

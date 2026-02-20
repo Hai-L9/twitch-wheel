@@ -12,7 +12,7 @@ A local desktop app that connects to Twitch chat, counts phrase votes in real ti
 - Similar/contained phrases are automatically merged into an existing phrase bucket to reduce duplicate near-matches.
 - Wheel slices are weighted by vote count and update instantly.
 - Separate wheel render window with continuous spin and a live green label showing the slice under the pointer.
-- Wheel display also shows a smaller green `voted by:` line under the current phrase using stored username-vote mappings.
+- Wheel display also shows a smaller green `voted by:` line under the current phrase; as the pointer moves, it resolves to an individual voter within that phrase slice.
 - Wheel window scales responsively and keeps a fixed square aspect ratio during resize.
 - Connection status/error area plus live chat feed.
 
