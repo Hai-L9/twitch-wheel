@@ -3,12 +3,14 @@ import math
 import os
 import queue
 import random
+import re
 import socket
 import threading
 import time
 import tkinter as tk
 from dataclasses import dataclass
 from tkinter import messagebox, ttk
+from difflib import SequenceMatcher
 from typing import Callable, Dict, Optional
 
 CONFIG_PATH = "config.json"
@@ -337,15 +339,43 @@ class App:
 
         self.root.after(100, self.process_events)
 
+    @staticmethod
+    def normalize_phrase(text: str) -> str:
+        lowered = " ".join(text.strip().lower().split())
+        return re.sub(r"[^a-z0-9\s]", "", lowered).strip()
+
+    def find_matching_phrase(self, phrase: str, ignore_phrase: str = "") -> Optional[str]:
+        if not phrase:
+            return None
+
+        for existing in self.vote_counts:
+            if ignore_phrase and existing == ignore_phrase:
+                continue
+
+            if phrase == existing:
+                return existing
+
+            if phrase in existing or existing in phrase:
+                return existing
+
+            ratio = SequenceMatcher(None, phrase, existing).ratio()
+            if ratio >= 0.86:
+                return existing
+
+        return None
+
     def consume_vote(self, message: str) -> None:
         if not self.voting_active:
             return
 
-        phrase = " ".join(message.strip().lower().split())
+        phrase = self.normalize_phrase(message)
         if not phrase:
             return
 
-        self.vote_counts[phrase] = self.vote_counts.get(phrase, 0) + 1
+        matched_phrase = self.find_matching_phrase(phrase)
+        target_phrase = matched_phrase or phrase
+
+        self.vote_counts[target_phrase] = self.vote_counts.get(target_phrase, 0) + 1
         self.refresh_table_from_votes()
 
     def refresh_table_from_votes(self) -> None:
@@ -386,13 +416,21 @@ class App:
         self.root.after(250, self.update_timer)
 
     def add_or_update_segment(self) -> None:
-        phrase = " ".join(self.new_phrase.get().strip().lower().split())
+        phrase = self.normalize_phrase(self.new_phrase.get())
         votes = self.safe_int(self.new_votes.get(), 1)
         if not phrase:
             return
-        self.vote_counts[phrase] = max(0, votes)
-        if self.vote_counts[phrase] <= 0:
-            del self.vote_counts[phrase]
+
+        matched_phrase = self.find_matching_phrase(phrase)
+        if matched_phrase and matched_phrase != phrase:
+            self.vote_counts[matched_phrase] = max(0, self.vote_counts.get(matched_phrase, 0) + votes)
+            target_phrase = matched_phrase
+        else:
+            self.vote_counts[phrase] = max(0, votes)
+            target_phrase = phrase
+
+        if self.vote_counts.get(target_phrase, 0) <= 0:
+            self.vote_counts.pop(target_phrase, None)
         self.refresh_table_from_votes()
         self.new_phrase.set("")
 
@@ -425,12 +463,14 @@ class App:
             editor.destroy()
 
             if col == "#1":
-                phrase_new = " ".join(new_value.lower().split())
+                phrase_new = self.normalize_phrase(new_value)
                 if not phrase_new:
                     return
                 if phrase_new != phrase_old:
                     self.vote_counts.pop(phrase_old, None)
-                    self.vote_counts[phrase_new] = votes_old
+                    matched_phrase = self.find_matching_phrase(phrase_new, ignore_phrase=phrase_old)
+                    target_phrase = matched_phrase or phrase_new
+                    self.vote_counts[target_phrase] = self.vote_counts.get(target_phrase, 0) + votes_old
             elif col == "#2":
                 votes_new = self.safe_int(new_value, votes_old)
                 if phrase_old in self.vote_counts:
@@ -478,8 +518,13 @@ class App:
         pointer_angle = 90
         final_rotation = (pointer_angle - winner_mid) % 360
 
+        current_rotation = self.rotation % 360
+        align_delta = (final_rotation - current_rotation) % 360
+        if align_delta < 20:
+            align_delta += 360
+
         spins = random.randint(6, 10)
-        self.winner_angle_target = final_rotation + 360 * spins
+        self.winner_angle_target = self.rotation + align_delta + 360 * spins
         self.spin_velocity = random.uniform(25, 40)
         self.spinning = True
         self._animate_spin(winner)

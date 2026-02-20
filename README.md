@@ -8,6 +8,7 @@ A local desktop app that connects to Twitch chat, counts phrase votes in real ti
 - 2-minute vote window using **startvote**.
 - Editable segment table (add, remove, and inline edit phrase/vote counts).
 - Wheel/table display only the top **N** most common phrases (N = input field).
+- Similar/contained phrases are automatically merged into an existing phrase bucket to reduce duplicate near-matches.
 - Wheel slices are weighted by vote count and update instantly.
 - Separate wheel render window with spin animation and winner overlay.
 - Connection status/error area plus live chat feed.
@@ -35,7 +36,7 @@ python main.py
 - Press **startvote** to begin a 120-second voting period.
 - Press **stopvote** to end the voting period early.
 - Every chat message becomes a normalized phrase (`lowercase`, trimmed spaces).
-- Phrase count increments as messages arrive.
+- Phrase count increments as messages arrive, and near-duplicate messages map to existing phrase entries when similar enough.
 - **Top phrases on wheel** sets how many highest-vote phrases are shown on the wheel/table; lower-ranked phrases are ignored in the display/spin until they move into the top set.
 - Edit the table at any time; wheel updates immediately.
 
