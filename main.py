@@ -316,34 +316,11 @@ class App:
         self.wheel_window.title("Twitch Vote Wheel")
         self.wheel_window.geometry("720x720")
         self.wheel_window.minsize(360, 360)
-        self._wheel_resize_guard = False
-        self._wheel_last_size = (720, 720)
-        self.wheel_window.bind("<Configure>", self.on_wheel_window_resize)
+        self.wheel_window.aspect(1, 1, 1, 1)
 
         self.wheel_canvas = WheelCanvas(self.wheel_window)
         self.wheel_canvas.pack(fill="both", expand=True)
-
-    def on_wheel_window_resize(self, event: tk.Event) -> None:
-        if event.widget is not self.wheel_window or self._wheel_resize_guard:
-            return
-
-        width = max(1, self.wheel_window.winfo_width())
-        height = max(1, self.wheel_window.winfo_height())
-        last_w, last_h = self._wheel_last_size
-
-        target_size = min(width, height)
-        if width != height:
-            if abs(width - last_w) >= abs(height - last_h):
-                target_size = width
-            else:
-                target_size = height
-
-            self._wheel_resize_guard = True
-            self.wheel_window.geometry(f"{target_size}x{target_size}")
-            self._wheel_resize_guard = False
-            self._wheel_last_size = (target_size, target_size)
-        else:
-            self._wheel_last_size = (width, height)
+        self.wheel_canvas.bind("<Configure>", lambda _e: self.wheel_canvas.draw_wheel())
 
     def connect_chat(self) -> None:
         channel = self.config.get("channel", "itskxtlyn")
