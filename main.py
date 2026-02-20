@@ -9,7 +9,7 @@ import threading
 import time
 import tkinter as tk
 from dataclasses import dataclass
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 from difflib import SequenceMatcher
 from typing import Callable, Dict, Optional
 
@@ -144,54 +144,70 @@ class WheelCanvas(tk.Canvas):
 
     def draw_wheel(self) -> None:
         self.delete("all")
-        cx, cy = 350, 350
-        radius = 300
+        width = max(1, self.winfo_width())
+        height = max(1, self.winfo_height())
+
+        cx = width / 2
+        cy = height / 2
+        pointer_margin = max(20, int(height * 0.03))
+        bottom_label_margin = max(40, int(height * 0.08))
+        radius = min(width * 0.45, (height - bottom_label_margin - pointer_margin) * 0.5)
+        radius = max(40, radius)
+
         total_votes = sum(self.entries.values())
         if total_votes <= 0:
-            self.create_text(cx, cy, text="No wheel segments yet", fill="white", font=("Arial", 24, "bold"))
-            return
-
-        start_angle = self.rotation
-        for idx, (phrase, votes) in enumerate(self.entries.items()):
-            extent = 360.0 * (votes / total_votes)
-            color = self.COLORS[idx % len(self.COLORS)]
-            self.create_arc(
-                cx - radius,
-                cy - radius,
-                cx + radius,
-                cy + radius,
-                start=start_angle,
-                extent=extent,
-                fill=color,
-                outline="black",
-                width=2,
-            )
-
-            label_angle = math.radians(start_angle + extent / 2)
-            tx = cx + math.cos(label_angle) * (radius * 0.6)
-            ty = cy - math.sin(label_angle) * (radius * 0.6)
             self.create_text(
-                tx,
-                ty,
-                text=f"{phrase}\n({votes})",
+                cx,
+                cy,
+                text="No wheel segments yet",
                 fill="white",
-                font=("Arial", 10, "bold"),
-                width=150,
-                justify="center",
+                font=("Arial", max(12, int(height * 0.035)), "bold"),
             )
-            start_angle += extent
+        else:
+            start_angle = self.rotation
+            for idx, (phrase, votes) in enumerate(self.entries.items()):
+                extent = 360.0 * (votes / total_votes)
+                color = self.COLORS[idx % len(self.COLORS)]
+                self.create_arc(
+                    cx - radius,
+                    cy - radius,
+                    cx + radius,
+                    cy + radius,
+                    start=start_angle,
+                    extent=extent,
+                    fill=color,
+                    outline="black",
+                    width=2,
+                )
+
+                label_angle = math.radians(start_angle + extent / 2)
+                tx = cx + math.cos(label_angle) * (radius * 0.6)
+                ty = cy - math.sin(label_angle) * (radius * 0.6)
+                self.create_text(
+                    tx,
+                    ty,
+                    text=f"{phrase}\n({votes})",
+                    fill="white",
+                    font=("Arial", max(8, int(height * 0.014)), "bold"),
+                    width=max(80, int(width * 0.22)),
+                    justify="center",
+                )
+                start_angle += extent
 
         if self.current_phrase:
             self.create_text(
                 cx,
-                675,
+                height - max(20, int(height * 0.04)),
                 text=self.current_phrase,
                 fill="#00ff66",
-                font=("Arial", 20, "bold"),
+                font=("Arial", max(12, int(height * 0.028)), "bold"),
             )
 
+        pointer_half_width = max(6, radius * 0.035)
+        pointer_top = pointer_margin
+        pointer_tip = pointer_top + max(12, radius * 0.09)
         self.create_polygon(
-            [cx - 10.5, 20, cx + 10.5, 20, cx, 48],
+            [cx - pointer_half_width, pointer_top, cx + pointer_half_width, pointer_top, cx, pointer_tip],
             fill="white",
             outline="white",
         )
@@ -270,6 +286,11 @@ class App:
         main.add(table_frame, weight=2)
         main.add(chat_frame, weight=2)
 
+        io_controls = ttk.Frame(table_frame)
+        io_controls.pack(fill="x", pady=(0, 6))
+        ttk.Button(io_controls, text="Import Segments", command=self.import_segments).pack(side="left")
+        ttk.Button(io_controls, text="Export Segments", command=self.export_segments).pack(side="left", padx=6)
+
         self.tree = ttk.Treeview(table_frame, columns=("phrase", "votes"), show="headings", height=20)
         self.tree.heading("phrase", text="Phrase")
         self.tree.heading("votes", text="Votes")
@@ -294,8 +315,35 @@ class App:
         self.wheel_window = tk.Toplevel(self.root)
         self.wheel_window.title("Twitch Vote Wheel")
         self.wheel_window.geometry("720x720")
+        self.wheel_window.minsize(360, 360)
+        self._wheel_resize_guard = False
+        self._wheel_last_size = (720, 720)
+        self.wheel_window.bind("<Configure>", self.on_wheel_window_resize)
+
         self.wheel_canvas = WheelCanvas(self.wheel_window)
         self.wheel_canvas.pack(fill="both", expand=True)
+
+    def on_wheel_window_resize(self, event: tk.Event) -> None:
+        if event.widget is not self.wheel_window or self._wheel_resize_guard:
+            return
+
+        width = max(1, self.wheel_window.winfo_width())
+        height = max(1, self.wheel_window.winfo_height())
+        last_w, last_h = self._wheel_last_size
+
+        target_size = min(width, height)
+        if width != height:
+            if abs(width - last_w) >= abs(height - last_h):
+                target_size = width
+            else:
+                target_size = height
+
+            self._wheel_resize_guard = True
+            self.wheel_window.geometry(f"{target_size}x{target_size}")
+            self._wheel_resize_guard = False
+            self._wheel_last_size = (target_size, target_size)
+        else:
+            self._wheel_last_size = (width, height)
 
     def connect_chat(self) -> None:
         channel = self.config.get("channel", "itskxtlyn")
@@ -468,6 +516,63 @@ class App:
             phrase = self.tree.item(item, "values")[0]
             self.vote_counts.pop(phrase, None)
         self.refresh_table_from_votes()
+
+    def export_segments(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title="Export Wheel Segments",
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        top_votes = self.get_top_votes()
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                for phrase, votes in sorted(top_votes.items(), key=lambda x: (-x[1], x[0])):
+                    f.write(f"{phrase}\t{votes}\n")
+            self.set_status(f"Exported {len(top_votes)} segments to {os.path.basename(path)}")
+        except OSError as exc:
+            messagebox.showerror("Export failed", f"Could not export segments:\n{exc}")
+
+    def import_segments(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Import Wheel Segments",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+
+        imported: Dict[str, int] = {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for raw in f:
+                    line = raw.strip()
+                    if not line:
+                        continue
+
+                    if "\t" in line:
+                        phrase_raw, votes_raw = line.rsplit("\t", 1)
+                    else:
+                        parts = line.rsplit(" ", 1)
+                        if len(parts) != 2:
+                            continue
+                        phrase_raw, votes_raw = parts
+
+                    phrase = self.normalize_phrase(phrase_raw)
+                    votes = self.safe_int(votes_raw.strip(), 0)
+                    if not phrase or votes <= 0:
+                        continue
+
+                    existing = self.find_matching_phrase(phrase)
+                    target = existing or phrase
+                    imported[target] = imported.get(target, 0) + votes
+
+            self.vote_counts = imported
+            self.refresh_table_from_votes()
+            self.set_status(f"Imported {len(imported)} segments from {os.path.basename(path)}")
+        except OSError as exc:
+            messagebox.showerror("Import failed", f"Could not import segments:\n{exc}")
 
     def edit_tree_cell(self, event: tk.Event) -> None:
         item_id = self.tree.identify_row(event.y)
