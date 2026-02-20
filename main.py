@@ -146,12 +146,6 @@ class WheelCanvas(tk.Canvas):
         self.delete("all")
         cx, cy = 350, 350
         radius = 300
-        self.create_polygon(
-            [cx - 15, 20, cx + 15, 20, cx, 60],
-            fill="white",
-            outline="white",
-        )
-
         total_votes = sum(self.entries.values())
         if total_votes <= 0:
             self.create_text(cx, cy, text="No wheel segments yet", fill="white", font=("Arial", 24, "bold"))
@@ -191,10 +185,16 @@ class WheelCanvas(tk.Canvas):
             self.create_text(
                 cx,
                 675,
-                text=f"Pointer slice: {self.current_phrase}",
+                text=self.current_phrase,
                 fill="#00ff66",
                 font=("Arial", 20, "bold"),
             )
+
+        self.create_polygon(
+            [cx - 10.5, 20, cx + 10.5, 20, cx, 48],
+            fill="white",
+            outline="white",
+        )
 
 
 class App:
